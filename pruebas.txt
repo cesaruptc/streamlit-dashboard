@@ -1,0 +1,290 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import folium   # Renderizado del mapa
+from streamlit_folium import st_folium
+from datetime import datetime
+from folium.plugins import FastMarkerCluster
+
+# Configuración de la página
+st.set_page_config(
+    page_title = "Sales Analytics Dashboard",
+    layout="wide",
+    initial_sidebar_state = "expanded"
+)
+
+# Función para la carga de datos
+def load_data():
+    """
+    Cargar y combinar los conjuntos de datos referentes a
+    1. Transacciones de ventas
+    2. Catálogo de productos
+    3. Información de clientes
+    Retorna una tupla con los datos
+    """
+    transacciones = pd.read_csv('df_transacciones.csv', parse_dates=['fecha'],dtype={'producto_id':'string', 'cliente_id':'string'})
+    productos = pd.read_csv('df_productos.csv', dtype={'cliente_id': 'string'})
+    clientes = pd.read_csv('df_clientes.csv', dtype={'cliente_id': 'string'})
+
+    datos_comb = pd.merge(transacciones, productos, on = 'producto_id', how='left')
+    datos_comb = pd.merge(datos_comb, clientes, on='cliente_id', how='left')
+
+    return datos_comb, clientes
+
+# Carga inicial de datos
+df, df_clientes = load_data()
+
+# Barra lateral con los filtros interactivos
+with st.sidebar:
+    st.header("Filtros")
+
+    # Selector de rango de fechas
+    fecha_min = df['fecha'].min().date()
+    fecha_max = df['fecha'].max().date()
+
+    fechas_seleccionadas = st.date_input(
+        label = "Rango de fechas",
+        value = (fecha_min, fecha_max),
+        min_value = fecha_min,
+        max_value = fecha_max,
+        help = "Selecciona el período a analizar"
+    )
+
+    # Selector de categorías
+    categorias_disponibles = sorted(df['categoria'].unique())
+    categorias_seleccionadas = st.multiselect(
+        label = "Categorías de productos",
+        options = categorias_disponibles,
+        default = categorias_disponibles,
+        help = "Filtra por categorías de productos"
+    )
+
+    # Filtro por segmento de clientes
+    segmentos = sorted(df['segmento'].unique())
+    segmentos_seleccionados = st.multiselect(
+        label = "Segmentos de clientes",
+        options = segmentos,
+        default = segmentos,
+        help = "Filtra por segmentos de clientes"
+    )
+
+# Aplicación de filtros
+condicion_filtro = (
+    (df['fecha'].dt.date >= fechas_seleccionadas[0]) &
+    (df['fecha'].dt.date <= fechas_seleccionadas[1]) &
+    (df['categoria'].isin(categorias_seleccionadas)) &
+    (df['segmento'].isin(segmentos_seleccionados))
+)
+
+# Aplicar filtros
+df_filtrado = df[condicion_filtro].copy()
+
+# Sección principal del dasboard, primero los kpis
+st.title("Dashboard de Ventas")
+st.markdown("""
+    Visualización interactiva de métricas de ventas y distribución de clientes.
+    Utiliza los filtros en la barra lateral para personalizar la vista.
+""")
+
+# KPIS Principales
+st.header("Métricas clave")
+
+# Cálculo de métricas
+ventas_totales = df_filtrado['total'].sum()
+ventas_mensuales = df_filtrado.groupby(
+    pd.Grouper(key='fecha', freq='ME')
+)['total'].sum().mean()
+clientes_unicos = df_filtrado['cliente_id'].nunique()
+
+# Cálculo de tasa de retención
+compras_por_cliente = df_filtrado['cliente_id'].value_counts()
+tasa_retencion = (compras_por_cliente > 1).mean() * 100
+
+# Mostras métricas
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric(
+        label = "Ventas totales",
+        value = f"${ventas_totales:,.2f}",
+        help = "Suma total de ventas en el período seleccionado"
+    )
+
+with col2:
+    st.metric(
+        label="Ventas Mensuales Promedio",
+        value=f"${ventas_mensuales:,.2f}",
+        help="Promedio de ventas por mes"
+    )
+
+with col3:
+    st.metric(
+        label="Clientes Únicos",
+        value=f"{clientes_unicos:,}",
+        help="Número de clientes distintos con compras"
+    )
+
+with col4:
+    st.metric(
+        label="Tasa de Retención",
+        value=f"{tasa_retencion:.1f}%",
+        help="Porcentaje de clientes con más de una compra"
+    )
+
+# Gráficos de tendencias
+st.header("Tendencia mensual de ventas")
+
+datos_mensuales = df_filtrado.groupby(
+    pd.Grouper(key='fecha', freq='ME')
+).agg({
+    'total':'sum',
+    'transaccion_id':'count'
+}).rename(columns={
+    'transaccion_id':'numero_transacciones'
+}).reset_index()
+
+fig = px.area(
+    datos_mensuales,
+    x='fecha',
+    y='total',
+    title='Evolución mensual de ventas',
+    labels={
+        'fecha': 'Mes',
+        'total': 'Ventas ($)'
+    },
+    hover_data=['numero_transacciones']
+)
+
+fig.update_traces(
+    line=dict(width=2.5),
+    marker=dict(size=8),
+    fill='tozeroy',
+    fillcolor='rgba(100, 200, 150, 0.2)'
+)
+
+fig.update_layout(
+    xaxis_title="Mes",
+    yaxis_title="Ventas ($)",
+    hovermode="x unified"
+)
+
+# Mostrar gráfico
+st.plotly_chart(fig, use_container_width = True)
+
+
+# Mapa de Distribución Geográfica con st_folium
+
+
+# Verificación y limpieza de datos (igual que antes)
+df_clientes_geo = df_clientes.copy()
+st.header("Distribución Geográfica de Clientes")
+
+# Crear mapa base
+m = folium.Map(location=[df_clientes_geo['latitud'].mean(), df_clientes_geo['longitud'].mean()],
+               zoom_start=6,
+               tiles="cartodbpositron")
+
+# Usar FastMarkerCluster para mejor rendimiento
+FastMarkerCluster(
+    data=df_clientes_geo[['latitud', 'longitud']].values.tolist(),
+    name="Clientes",
+    overlay=True,
+    control=True
+).add_to(m)
+
+# Añadir control de capas
+folium.LayerControl().add_to(m)
+
+# Mostrar el mapa
+st_data = st_folium(
+    m,
+    width=1200,
+    height=600,
+    returned_objects=[]
+)
+
+# Información adicional debajo del mapa
+st.write(f"Total clientes mostrados: {len(df_clientes_geo):,}")
+st.caption("Zoom in/out para ver detalles. Haz clic en los marcadores para más información.")
+# --------------------------------------------------
+# Análisis por Categoría
+# --------------------------------------------------
+st.header("📦 Ventas por Categoría")
+
+# Diseño de dos columnas
+col_izq, col_der = st.columns(2)
+
+with col_izq:
+    # Gráfico de torta por categoría
+    ventas_por_categoria = df_filtrado.groupby('categoria')['total'].sum().reset_index()
+
+    fig_torta = px.pie(
+        ventas_por_categoria,
+        names='categoria',
+        values='total',
+        title='Distribución de Ventas por Categoría',
+        hole=0.3,  # Donut chart
+        color_discrete_sequence=px.colors.qualitative.Pastel
+    )
+
+    st.plotly_chart(fig_torta, use_container_width=True)
+
+with col_der:
+    # Gráfico de barras por categoría
+    fig_barras = px.bar(
+        ventas_por_categoria.sort_values('total', ascending=False),
+        x='categoria',
+        y='total',
+        title='Ventas por Categoría (Ordenadas)',
+        labels={'total': 'Monto de Ventas ($)'},
+        color='categoria',
+        color_discrete_sequence=px.colors.qualitative.Pastel
+    )
+
+    fig_barras.update_layout(showlegend=False)
+    st.plotly_chart(fig_barras, use_container_width=True)
+
+# --------------------------------------------------
+# Explorador de Datos
+# --------------------------------------------------
+st.header("🔍 Explorador de Datos")
+
+# Mostrar datos filtrados con configuración de columnas
+st.dataframe(
+    df_filtrado.sort_values('fecha', ascending=False),
+    column_config={
+        "fecha": "Fecha",
+        "cliente_id": "ID Cliente",
+        "producto_id": "ID Producto",
+        "nombre": "Nombre Producto",
+        "categoria": "Categoría",
+        "cantidad": st.column_config.NumberColumn(
+            "Cantidad",
+            format="%d"  # Formato como entero
+        ),
+        "total": st.column_config.NumberColumn(
+            "Monto",
+            format="$%.2f"  # Formato monetario
+        ),
+        "segmento": "Segmento"
+    },
+    hide_index=True,  # Ocultar índice
+    use_container_width=True,
+    height=400  # Altura fija para el dataframe
+)
+
+# --------------------------------------------------
+# Pie de página
+# --------------------------------------------------
+st.markdown("---")
+st.markdown(
+    """
+    **Funcionalidades del Tablero:**
+    - Filtrado por rango de fechas
+    - Cálculo dinámico de métricas clave
+    - Visualización geográfica de clientes
+    - Análisis por categorías de productos
+    - Exploración de datos crudos
+
+    *Última actualización de datos: {}*
+    """.format(datetime.now().strftime("%Y-%m-%d"))
+)
