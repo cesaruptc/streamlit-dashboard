@@ -7,13 +7,6 @@ from datetime import datetime
 from folium.plugins import MarkerCluster
 from string import capwords
 
-# Configuración de la página
-st.set_page_config(
-    page_title = "Sales Analytics Dashboard",
-    layout="wide",
-    initial_sidebar_state = "expanded"
-)
-
 def obtener_color(ventas):
     if ventas > 1000000:  # Más de 1M
         return '#ff0000'  # Rojo
@@ -41,6 +34,13 @@ def load_data():
     datos_comb = pd.merge(datos_comb, clientes, on='cliente_id', how='left')
 
     return datos_comb, clientes
+
+# Configuración de la página
+st.set_page_config(
+    page_title = "Sales Analytics Dashboard",
+    layout="wide",
+    initial_sidebar_state = "expanded"
+)
 
 # Carga inicial de datos
 df, df_clientes = load_data()
@@ -277,9 +277,9 @@ st_folium(m, use_container_width = True, height=500)
 # Otros gráficos para análisis
 st.header("Análisis de ventas")
 
-col_izq, col_der = st.columns(2)
+col1, col2, col3 = st.columns(3)
 
-with col_izq:
+with col1:
     # Gráfico de pastel de ventas por categoría
     ventas_por_categoria = df_filtrado.groupby('categoria')['total'].sum().reset_index()
 
@@ -298,7 +298,7 @@ with col_izq:
 
     st.plotly_chart(fig_torta, use_container_width=True)
 
-with col_der:
+with col2:
     # Gráfico de pastel de ventas por método de pago
     ventas_pago = df_filtrado.groupby('metodo_pago')['total'].sum().reset_index()
 
@@ -317,57 +317,30 @@ with col_der:
 
     st.plotly_chart(fig_pago, use_container_width=True)
 
+with col3:
+    # Gráfico de barras por segmento de cliente
+    ventas_por_segmento = df_filtrado.groupby('segmento')['total'].sum().reset_index()
+
+    fig_segmento = px.bar(
+        ventas_por_segmento.sort_values('total', ascending=False),
+        x='segmento',
+        y='total',
+        title='Ventas por Segmento de Cliente',
+        labels={'segmento': 'Segmento', 'total': 'Total'},
+        color='segmento',
+        color_discrete_sequence=px.colors.qualitative.Pastel
+    )
+
+    fig_segmento.update_traces(
+        hovertemplate='<b>Segmento:</b> %{x}<br><b>Total:</b> $%{y:,.2f}<extra></extra>'
+    )
+
+    fig_segmento.update_layout(showlegend=False)
+    st.plotly_chart(fig_segmento, use_container_width=True)
+
 col_extra = st.container()
 
 with col_extra:
-    col1, col2 = st.columns(2)
-    with col1:
-        # Gráfico de barras por segmento de cliente
-        ventas_por_segmento = df_filtrado.groupby('segmento')['total'].sum().reset_index()
-
-        fig_segmento = px.bar(
-            ventas_por_segmento.sort_values('total', ascending=False),
-            x='segmento',
-            y='total',
-            title='Ventas por Segmento de Cliente',
-            labels={'segmento': 'Segmento', 'total': 'Total'},
-            color='segmento',
-            color_discrete_sequence=px.colors.qualitative.Pastel
-        )
-
-        fig_segmento.update_traces(
-            hovertemplate='<b>Segmento:</b> %{x}<br><b>Total:</b> $%{y:,.2f}<extra></extra>'
-        )
-
-        fig_segmento.update_layout(showlegend=False)
-        st.plotly_chart(fig_segmento, use_container_width=True)
-
-    with col2:
-        # Top 10 de los productos más vendidos
-        top_productos = df_filtrado.groupby('nombre_x')['cantidad'].sum().nlargest(10).reset_index() # Se agrupa por producto y se obtienen los 10 primeros
-        top_productos = top_productos.rename(columns={'nombre_x': 'Producto'})
-
-        fig_top_prod = px.bar(
-            top_productos,
-            x='Producto',
-            y='cantidad',
-            title='Top 10 Productos Más Vendidos',
-            labels={'nombre': 'Producto', 'cantidad': 'Cantidad Vendida'},
-            color='Producto',
-            color_discrete_sequence=px.colors.qualitative.Set2
-        )
-
-        fig_top_prod.update_traces(
-            hovertemplate='<b>Producto:</b> %{x}<br><b>Cantidad:</b> $%{y:,.2f}<extra></extra>'
-        )
-
-        fig_top_prod.update_layout(showlegend=False, xaxis_tickangle=-45)
-        st.plotly_chart(fig_top_prod, use_container_width=True)
-
-col_extra2 = st.container()
-
-with col_extra2:
-    # Gráfico de relación entre precio y cantidad de productos vendida
     col1, col2 = st.columns(2)
     with col1:
         df_precios = df_filtrado.copy()
@@ -393,25 +366,26 @@ with col_extra2:
         st.plotly_chart(fig_precio_cantidad, use_container_width=True)
 
     with col2:
-        # Gráfico de stock por categoría, este valor no varía
-        stock_categoria = df_filtrado.groupby('categoria')['stock'].mean().reset_index()
+        # Top 10 de los productos más vendidos
+        top_productos = df_filtrado.groupby('nombre_x')['cantidad'].sum().nlargest(10).reset_index() # Se agrupa por producto y se obtienen los 10 primeros
+        top_productos = top_productos.rename(columns={'nombre_x': 'Producto'})
 
-        fig_stock = px.bar(
-            stock_categoria.sort_values('stock', ascending=False),
-            x='categoria',
-            y='stock',
-            title='Stock Promedio por Categoría',
-            labels={'categoria': 'Categoría', 'stock': 'Stock Promedio'},
-            color='categoria',
-            color_discrete_sequence=px.colors.qualitative.Set3
+        fig_top_prod = px.bar(
+            top_productos,
+            x='Producto',
+            y='cantidad',
+            title='Top 10 Productos Más Vendidos',
+            labels={'nombre': 'Producto', 'cantidad': 'Cantidad Vendida'},
+            color='Producto',
+            color_discrete_sequence=px.colors.qualitative.Set2
         )
 
-        fig_stock.update_traces(
-            hovertemplate='<b>Categoría:</b> %{x}<br><b>Stock Promedio:</b> %{y:.0f}<extra></extra>'
+        fig_top_prod.update_traces(
+            hovertemplate='<b>Producto:</b> %{x}<br><b>Cantidad:</b> $%{y:,.2f}<extra></extra>'
         )
 
-        fig_stock.update_layout(showlegend=False)
-        st.plotly_chart(fig_stock, use_container_width=True)
+        fig_top_prod.update_layout(showlegend=False, xaxis_tickangle=-45)
+        st.plotly_chart(fig_top_prod, use_container_width=True)
 
 st.header("Explorador de Datos")
 
